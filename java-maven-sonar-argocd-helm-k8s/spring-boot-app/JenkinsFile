@@ -7,10 +7,11 @@ pipeline {
   }
   stages {
     stage('Checkout') {
-      steps {
-        sh 'echo passed'
-        //git branch: 'main', url: 'https://github.com/iam-veeramalla/Jenkins-Zero-To-Hero.git'
-      }
+    steps {
+        git branch: 'main',
+            url: 'https://github.com/kethachaitanya/Jenkins-Zero-To-Hero.git'
+    }
+}
     }
     stage('Build and Test') {
       steps {
@@ -21,7 +22,7 @@ pipeline {
     }
     stage('Static Code Analysis') {
   environment {
-    SONAR_URL = "http://50.16.26.158:9000"
+    SONAR_URL = "http://172.31.37.231:9000"
   }
   steps {
     withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_AUTH_TOKEN')]) {
@@ -58,8 +59,8 @@ pipeline {
         steps {
             withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
                 sh '''
-                    git config user.email "abhishek.xyz@gmail.com"
-                    git config user.name "Abhishek Veeramalla"
+                    git config user.email "kethachaitanya0004@gmail.com"
+                    git config user.name "chaitanya"
                     BUILD_NUMBER=${BUILD_NUMBER}
                     sed -i "s/replaceImageTag/${BUILD_NUMBER}/g" java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
                     git add java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
