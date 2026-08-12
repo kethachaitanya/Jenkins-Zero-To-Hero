@@ -1,12 +1,12 @@
 pipeline {
 
-    agent {
-        docker {
-            image 'abhishekf5/maven-abhishek-docker-agent:v1'
-            args '--user root -v /var/run/docker.sock:/var/run/docker.sock'
-        }
+ agent {
+    docker {
+        image 'abhishekf5/maven-abhishek-docker-agent:v1'
+        args '--user root --network host -v /var/run/docker.sock:/var/run/docker.sock'
+        reuseNode true
     }
-
+}
     stages {
 
         stage('Checkout') {
@@ -15,7 +15,17 @@ pipeline {
                     url: 'https://github.com/kethachaitanya/Jenkins-Zero-To-Hero.git'
             }
         }
+stage('Update Docker CLI') {
+    steps {
+        sh '''
+            apt-get update
+            apt-get install -y docker.io
 
+            docker --version
+            docker version
+        '''
+    }
+}
         stage('Build and Test') {
             steps {
                 sh 'ls -ltr'
