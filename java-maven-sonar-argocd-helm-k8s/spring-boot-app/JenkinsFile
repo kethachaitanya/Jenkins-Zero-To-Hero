@@ -1,48 +1,46 @@
 pipeline {
-
- agent {
-    docker {
-        image 'abhishekf5/maven-abhishek-docker-agent:v1'
-        args '--user root --network host -v /var/run/docker.sock:/var/run/docker.sock'
-        reuseNode true
+    agent {
+        docker {
+            image 'abhishekf5/maven-abhishek-docker-agent:v1'
+            args '--user root --network host -v /var/run/docker.sock:/var/run/docker.sock'
+            reuseNode true
+        }
     }
-}
-    stages {
 
+    environment {
+        SONAR_URL = 'http://172.31.34.39:9000'
+        DOCKER_IMAGE = "chaitanya0004/ultimate-cicd:${BUILD_NUMBER}"
+        APP_DIR = 'java-maven-sonar-argocd-helm-k8s/spring-boot-app'
+        DEPLOY_FILE = 'java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml'
+    }
+
+    stages {
         stage('Checkout') {
             steps {
                 git branch: 'main',
                     url: 'https://github.com/kethachaitanya/Jenkins-Zero-To-Hero.git'
             }
         }
-stage('Update Docker CLI') {
-    steps {
-        sh '''
-            apt-get update
-            apt-get install -y docker.io
 
-            docker --version
-            docker version
-        '''
-    }
-}
-        stage('Build and Test') {
+        stage('Verify Tools') {
             steps {
-                sh 'ls -ltr'
-
                 sh '''
-                    cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
-                    mvn clean package
+                    mvn -version
+                    docker --version
+                    docker info
                 '''
             }
         }
 
-        stage('Static Code Analysis') {
-
-            environment {
-                SONAR_URL = 'http://172.31.37.231:9000'
+        stage('Build and Test') {
+            steps {
+                dir("${APP_DIR}") {
+                    sh 'mvn clean verify'
+                }
             }
+        }
 
+        stage('Static Code Analysis') {
             steps {
                 withCredentials([
                     string(
@@ -50,34 +48,24 @@ stage('Update Docker CLI') {
                         variable: 'SONAR_AUTH_TOKEN'
                     )
                 ]) {
-
-                    sh '''
-                        cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
-
-                        mvn clean verify \
-                        org.sonarsource.scanner.maven:sonar-maven-plugin:5.7.0.6970:sonar \
-                        -Dsonar.host.url=$SONAR_URL \
-                        -Dsonar.token=$SONAR_AUTH_TOKEN
-                    '''
+                    dir("${APP_DIR}") {
+                        sh '''
+                            mvn org.sonarsource.scanner.maven:sonar-maven-plugin:5.7.0.6970:sonar \
+                                -Dsonar.host.url="$SONAR_URL" \
+                                -Dsonar.token="$SONAR_AUTH_TOKEN"
+                        '''
+                    }
                 }
             }
         }
 
         stage('Build and Push Docker Image') {
-
-            environment {
-                DOCKER_IMAGE = "chaitanya0004/ultimate-cicd:${BUILD_NUMBER}"
-            }
-
             steps {
+                sh '''
+                    docker build -t "$DOCKER_IMAGE" "$APP_DIR"
+                '''
 
                 script {
-
-                    sh '''
-                        cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
-                        docker build -t ${DOCKER_IMAGE} .
-                    '''
-
                     def dockerImage = docker.image("${DOCKER_IMAGE}")
 
                     docker.withRegistry(
@@ -91,37 +79,54 @@ stage('Update Docker CLI') {
         }
 
         stage('Update Deployment File') {
-
-            environment {
-                GIT_REPO_NAME = 'Jenkins-Zero-To-Hero'
-                GIT_USER_NAME = 'kethachaitanya'
-            }
-
             steps {
-
                 withCredentials([
                     string(
                         credentialsId: 'github',
                         variable: 'GITHUB_TOKEN'
                     )
                 ]) {
-
                     sh '''
+                        set -eu
+
                         git config user.email "kethachaitanya0004@gmail.com"
                         git config user.name "K Chaitanya"
 
-                        sed -i "s/replaceImageTag/${BUILD_NUMBER}/g" \
-                        java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
+                        # Update the image tag in the Kubernetes manifest.
+                        sed -i -E \
+                          "s#(image:[[:space:]]*chaitanya0004/ultimate-cicd:).*#\\1${BUILD_NUMBER}#" \
+                          "$DEPLOY_FILE"
 
-                        git add java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
+                        git add "$DEPLOY_FILE"
 
-                        git commit -m "Update deployment image to version ${BUILD_NUMBER}" || true
+                        if git diff --cached --quiet; then
+                            echo "No deployment manifest changes to commit."
+                            exit 0
+                        fi
 
-                        git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}.git HEAD:main
+                        git commit -m "Update deployment image to version ${BUILD_NUMBER}"
+
+                        # Supply the GitHub token through Git's askpass mechanism.
+                        cat > .git-askpass.sh <<'ASKPASS'
+#!/bin/sh
+case "$1" in
+    *Username*) printf '%s\\n' 'x-access-token' ;;
+    *Password*) printf '%s\\n' "$GITHUB_TOKEN" ;;
+    *) exit 1 ;;
+esac
+ASKPASS
+
+                        chmod 700 .git-askpass.sh
+                        trap 'rm -f .git-askpass.sh' EXIT
+
+                        GIT_ASKPASS="$PWD/.git-askpass.sh" \
+                        GIT_TERMINAL_PROMPT=0 \
+                        git push \
+                          https://github.com/kethachaitanya/Jenkins-Zero-To-Hero.git \
+                          HEAD:main
                     '''
                 }
             }
         }
-
     }
 }
