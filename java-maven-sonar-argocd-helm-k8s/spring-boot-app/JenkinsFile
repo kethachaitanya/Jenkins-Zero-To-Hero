@@ -1,41 +1,34 @@
+```groovy
 pipeline {
     agent {
         docker {
             image 'abhishekf5/maven-abhishek-docker-agent:v1'
-            args '--user root --network host -v /var/run/docker.sock:/var/run/docker.sock'
+            args '--user root -v /var/run/docker.sock:/var/run/docker.sock'
             reuseNode true
         }
     }
 
     environment {
-        SONAR_URL = 'http://172.31.34.39:9000'
         DOCKER_IMAGE = "chaitanya0004/ultimate-cicd:${BUILD_NUMBER}"
-        APP_DIR = 'java-maven-sonar-argocd-helm-k8s/spring-boot-app'
-        DEPLOY_FILE = 'java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml'
+        SONAR_URL = "http://YOUR_SONARQUBE_PRIVATE_IP:9000"
+        GIT_REPO_NAME = "Jenkins-Zero-To-Hero"
+        GIT_USER_NAME = "YOUR_GITHUB_USERNAME"
     }
 
     stages {
         stage('Checkout') {
             steps {
                 git branch: 'main',
-                    url: 'https://github.com/kethachaitanya/Jenkins-Zero-To-Hero.git'
-            }
-        }
+                    url: 'https://github.com/YOUR_GITHUB_USERNAME/Jenkins-Zero-To-Hero.git'
 
-        stage('Verify Tools') {
-            steps {
-                sh '''
-                    mvn -version
-                    docker --version
-                    docker info
-                '''
+                sh 'echo "Source code checked out successfully"'
             }
         }
 
         stage('Build and Test') {
             steps {
-                dir("${APP_DIR}") {
-                    sh 'mvn clean verify'
+                dir('java-maven-sonar-argocd-helm-k8s/spring-boot-app') {
+                    sh 'mvn clean package'
                 }
             }
         }
@@ -48,11 +41,11 @@ pipeline {
                         variable: 'SONAR_AUTH_TOKEN'
                     )
                 ]) {
-                    dir("${APP_DIR}") {
+                    dir('java-maven-sonar-argocd-helm-k8s/spring-boot-app') {
                         sh '''
-                            mvn org.sonarsource.scanner.maven:sonar-maven-plugin:5.7.0.6970:sonar \
-                                -Dsonar.host.url="$SONAR_URL" \
-                                -Dsonar.token="$SONAR_AUTH_TOKEN"
+                            mvn sonar:sonar \
+                              -Dsonar.host.url="$SONAR_URL" \
+                              -Dsonar.token="$SONAR_AUTH_TOKEN"
                         '''
                     }
                 }
@@ -61,18 +54,16 @@ pipeline {
 
         stage('Build and Push Docker Image') {
             steps {
-                sh '''
-                    docker build -t "$DOCKER_IMAGE" "$APP_DIR"
-                '''
-
                 script {
-                    def dockerImage = docker.image("${DOCKER_IMAGE}")
+                    dir('java-maven-sonar-argocd-helm-k8s/spring-boot-app') {
+                        sh 'docker build -t "$DOCKER_IMAGE" .'
+                    }
 
                     docker.withRegistry(
                         'https://index.docker.io/v1/',
                         'docker-cred'
                     ) {
-                        dockerImage.push()
+                        docker.image(env.DOCKER_IMAGE).push()
                     }
                 }
             }
@@ -81,52 +72,67 @@ pipeline {
         stage('Update Deployment File') {
             steps {
                 withCredentials([
-                    string(
+                    usernamePassword(
                         credentialsId: 'github',
-                        variable: 'GITHUB_TOKEN'
+                        usernameVariable: 'GIT_USERNAME',
+                        passwordVariable: 'GITHUB_TOKEN'
                     )
                 ]) {
                     sh '''
                         set -eu
 
-                        git config user.email "kethachaitanya0004@gmail.com"
+                        MANIFEST="java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml"
+
                         git config user.name "K Chaitanya"
+                        git config user.email "YOUR_GITHUB_EMAIL"
 
                         # Update the image tag in the Kubernetes manifest.
-                        sed -i -E \
-                          "s#(image:[[:space:]]*chaitanya0004/ultimate-cicd:).*#\\1${BUILD_NUMBER}#" \
-                          "$DEPLOY_FILE"
+                        sed -i "s|replaceImageTag|${BUILD_NUMBER}|g" "$MANIFEST"
 
-                        git add "$DEPLOY_FILE"
+                        git add "$MANIFEST"
 
-                        if git diff --cached --quiet; then
-                            echo "No deployment manifest changes to commit."
-                            exit 0
-                        fi
+                        if ! git diff --cached --quiet; then
+                            git commit -m "Update deployment image to version ${BUILD_NUMBER}"
 
-                        git commit -m "Update deployment image to version ${BUILD_NUMBER}"
+                            # Use askpass so the token is not embedded in the URL.
+                            ASKPASS="$(mktemp)"
+                            trap 'rm -f "$ASKPASS"' EXIT
 
-                        # Supply the GitHub token through Git's askpass mechanism.
-                        cat > .git-askpass.sh <<'ASKPASS'
+                            cat > "$ASKPASS" <<'ASKPASS_SCRIPT'
 #!/bin/sh
 case "$1" in
-    *Username*) printf '%s\\n' 'x-access-token' ;;
+    *Username*) printf '%s\\n' "$GIT_USERNAME" ;;
     *Password*) printf '%s\\n' "$GITHUB_TOKEN" ;;
     *) exit 1 ;;
 esac
-ASKPASS
+ASKPASS_SCRIPT
 
-                        chmod 700 .git-askpass.sh
-                        trap 'rm -f .git-askpass.sh' EXIT
-
-                        GIT_ASKPASS="$PWD/.git-askpass.sh" \
-                        GIT_TERMINAL_PROMPT=0 \
-                        git push \
-                          https://github.com/kethachaitanya/Jenkins-Zero-To-Hero.git \
-                          HEAD:main
+                            chmod 700 "$ASKPASS"
+                            GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+                                git push \
+                                "https://github.com/${GIT_REPO_NAME}.git" \
+                                HEAD:main
+                        else
+                            echo "No manifest changes to commit."
+                        fi
                     '''
                 }
             }
         }
     }
+
+    post {
+        success {
+            echo 'CI/CD pipeline completed successfully.'
+        }
+
+        failure {
+            echo 'Pipeline failed. Check the stage logs above.'
+        }
+
+        always {
+            echo 'Pipeline execution finished.'
+        }
+    }
 }
+```
