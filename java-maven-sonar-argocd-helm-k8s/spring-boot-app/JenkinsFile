@@ -1,3 +1,4 @@
+
 pipeline {
     agent {
         docker {
@@ -9,16 +10,16 @@ pipeline {
 
     environment {
         DOCKER_IMAGE = "chaitanya0004/ultimate-cicd:${BUILD_NUMBER}"
-        SONAR_URL = "http://YOUR_SONARQUBE_PRIVATE_IP:9000"
+        SONAR_URL = "http://172.31.34.39:9000"
         GIT_REPO_NAME = "Jenkins-Zero-To-Hero"
-        GIT_USER_NAME = "YOUR_GITHUB_USERNAME"
+        GIT_USER_NAME = "kethachaitanya"
     }
 
     stages {
         stage('Checkout') {
             steps {
                 git branch: 'main',
-                    url: 'https://github.com/YOUR_GITHUB_USERNAME/Jenkins-Zero-To-Hero.git'
+                    url: 'https://github.com/kethachaitanya/Jenkins-Zero-To-Hero.git'
 
                 sh 'echo "Source code checked out successfully"'
             }
@@ -85,7 +86,6 @@ pipeline {
                         git config user.name "K Chaitanya"
                         git config user.email "YOUR_GITHUB_EMAIL"
 
-                        # Update the image tag in the Kubernetes manifest.
                         sed -i "s|replaceImageTag|${BUILD_NUMBER}|g" "$MANIFEST"
 
                         git add "$MANIFEST"
@@ -93,24 +93,25 @@ pipeline {
                         if ! git diff --cached --quiet; then
                             git commit -m "Update deployment image to version ${BUILD_NUMBER}"
 
-                            # Use askpass so the token is not embedded in the URL.
                             ASKPASS="$(mktemp)"
                             trap 'rm -f "$ASKPASS"' EXIT
 
                             cat > "$ASKPASS" <<'ASKPASS_SCRIPT'
 #!/bin/sh
 case "$1" in
-    *Username*) printf '%s\\n' "$GIT_USERNAME" ;;
-    *Password*) printf '%s\\n' "$GITHUB_TOKEN" ;;
+    *Username*) printf '%s\n' "$GIT_USERNAME" ;;
+    *Password*) printf '%s\n' "$GITHUB_TOKEN" ;;
     *) exit 1 ;;
 esac
 ASKPASS_SCRIPT
 
                             chmod 700 "$ASKPASS"
-                            GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
-                                git push \
-                                "https://github.com/${GIT_REPO_NAME}.git" \
-                                HEAD:main
+
+                            GIT_ASKPASS="$ASKPASS" \
+                            GIT_TERMINAL_PROMPT=0 \
+                            git push \
+                              "https://github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}.git" \
+                              HEAD:main
                         else
                             echo "No manifest changes to commit."
                         fi
@@ -134,4 +135,3 @@ ASKPASS_SCRIPT
         }
     }
 }
-```
