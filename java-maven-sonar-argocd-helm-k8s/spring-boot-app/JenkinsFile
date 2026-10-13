@@ -43,7 +43,8 @@ pipeline {
                 ]) {
                     dir('java-maven-sonar-argocd-helm-k8s/spring-boot-app') {
                         sh '''
-                            mvn sonar:sonar \
+                            mvn clean verify \
+                              org.sonarsource.scanner.maven:sonar-maven-plugin:5.7.0.6970:sonar \
                               -Dsonar.host.url="$SONAR_URL" \
                               -Dsonar.token="$SONAR_AUTH_TOKEN"
                         '''
@@ -85,6 +86,11 @@ pipeline {
 
                         git config user.name "K Chaitanya"
                         git config user.email "YOUR_GITHUB_EMAIL"
+
+                        if ! grep -q 'replaceImageTag' "$MANIFEST"; then
+                            echo "ERROR: replaceImageTag was not found in $MANIFEST"
+                            exit 1
+                        fi
 
                         sed -i "s|replaceImageTag|${BUILD_NUMBER}|g" "$MANIFEST"
 
