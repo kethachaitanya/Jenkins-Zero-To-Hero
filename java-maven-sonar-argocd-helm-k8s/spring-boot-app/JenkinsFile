@@ -20,8 +20,36 @@ pipeline {
             steps {
                 git branch: 'main',
                     url: 'https://github.com/kethachaitanya/Jenkins-Zero-To-Hero.git'
-
                 sh 'echo "Source code checked out successfully"'
+            }
+        }
+
+        stage('Update Docker CLI') {
+            steps {
+                sh '''
+                    set -eu
+                    echo "Docker client before update:"
+                    docker --version || true
+
+                    apt-get update
+                    apt-get install -y ca-certificates curl
+                    install -m 0755 -d /etc/apt/keyrings
+
+                    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+                      -o /etc/apt/keyrings/docker.asc
+                    chmod a+r /etc/apt/keyrings/docker.asc
+
+                    . /etc/os-release
+                    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
+                      > /etc/apt/sources.list.d/docker.list
+
+                    apt-get update
+                    apt-get install -y docker-ce-cli
+
+                    echo "Docker client after update:"
+                    docker --version
+                    docker version
+                '''
             }
         }
 
@@ -57,7 +85,11 @@ pipeline {
             steps {
                 script {
                     dir('java-maven-sonar-argocd-helm-k8s/spring-boot-app') {
-                        sh 'docker build -t "$DOCKER_IMAGE" .'
+                        sh '''
+                            set -eu
+                            docker version
+                            docker build -t "$DOCKER_IMAGE" .
+                        '''
                     }
 
                     docker.withRegistry(
@@ -93,7 +125,6 @@ pipeline {
                         fi
 
                         sed -i "s|replaceImageTag|${BUILD_NUMBER}|g" "$MANIFEST"
-
                         git add "$MANIFEST"
 
                         if ! git diff --cached --quiet; then
@@ -131,11 +162,9 @@ ASKPASS_SCRIPT
         success {
             echo 'CI/CD pipeline completed successfully.'
         }
-
         failure {
             echo 'Pipeline failed. Check the stage logs above.'
         }
-
         always {
             echo 'Pipeline execution finished.'
         }
